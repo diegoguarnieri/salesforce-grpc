@@ -7,6 +7,7 @@ use Dotenv\Dotenv;
 use Eventbus\V1\FetchRequest;
 use Eventbus\V1\FetchResponse;
 use Eventbus\V1\PubSubClient;
+use Eventbus\V1\ReplayPreset;
 use Eventbus\V1\SchemaRequest;
 use Eventbus\V1\TopicRequest;
 
@@ -28,6 +29,7 @@ $client = new PubSubClient("$apiEndpoint:7443", [
     }
 ]);
 
+//$topic = '/data/TaskChangeEvent';
 $topic = '/data/LeadChangeEvent';
 
 // Request Avro schema for Lead CDC
@@ -62,6 +64,7 @@ $call = $client->Subscribe();
 $fetchRequest = new FetchRequest();
 $fetchRequest->setTopicName($topic);
 $fetchRequest->setNumRequested(10);
+$fetchRequest->setReplayPreset(ReplayPreset::EARLIEST);
 
 //initial request
 $call->write($fetchRequest);
@@ -74,6 +77,7 @@ while($response = $call->read()) {
         foreach($events as $event) {
             $replayId = base64_encode($event->getReplayId());
 
+            echo "-----------------------------------------------\n";
             echo "Received event with Replay ID: $replayId\n";
             $avroPayload = $event->getEvent()->getPayload();
 
@@ -82,17 +86,20 @@ while($response = $call->read()) {
             $buffer = $avroFactory->createReadableStreamFromString($avroPayload);
             $decodedData = $reader->read($buffer);
 
+            echo "Entity: " . $decodedData['ChangeEventHeader']['entityName'] . "\n";
             echo "Change Type: " . $decodedData['ChangeEventHeader']['changeType'] . "\n";
+            echo "Commit Timestamp: " . (DateTime::createFromFormat('U', (string) $decodedData['ChangeEventHeader']['commitTimestamp'] / 1000))->format('Y-m-d H:i:s T') . "\n";
             echo "Fields:\n";
             foreach($decodedData as $key => $value) {
-                if($key !== 'ChangeEventHeader') {
-
+                if($key === 'ChangeEventHeader') {
+                    echo "   Ids: " . json_encode($value['recordIds'] ?? []) . "\n";
+                } else {
                     if(is_array($value)) {
                         foreach($value as $subKey => $subValue) {
-                            if(!is_null($subValue)) echo "   $subKey: " . $subValue . "\n";
+                            printAAA($subKey, $subValue);
                         }
                     } else {
-                        if(!is_null($value)) echo "   $key: " . $value . "\n";
+                        printAAA($key, $value);
                     }
                 }
             }
@@ -105,6 +112,10 @@ while($response = $call->read()) {
 
 $call->cancel();
 
+
+function printAAA($key, $value) {
+    if(!is_null($value)) echo "   " . str_pad($key, 30, " ", STR_PAD_RIGHT) . ": " . $value . "\n";
+}
 
 function getAccessToken() {
     $url = 'https://login.salesforce.com/services/oauth2/token';
